@@ -684,3 +684,28 @@ async def rekomendasi_produk(rekomendasi: RequestRekomendasi, user: User = Depen
         return data
     else:
         return {'Error': response.status_code, 'Detail': response.text}
+
+# Route Grant Admin
+@app.put("/grant_admin", tags=["Admin"])
+async def grant_customer_to_admin(idUser:int , current_user: User = Depends(get_user)):
+    if(not current_user[4]):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Method ini hanya bisa digunakan oleh Admin!"
+        )
+    try:
+        with cnx.cursor() as cursor:
+            cursor.execute(f"SELECT * FROM user WHERE idUser = {idUser}")
+            pengiriman = cursor.fetchone()
+            if(pengiriman is None):
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"User dengan ID {idUser} tidak ditemukan!"
+                )
+            cursor.execute(
+                        f"""UPDATE user SET isAdmin = 1
+                        WHERE idUser = {idUser}""")
+            cnx.commit()
+            return {"message" : f"User dengan ID {idUser} berhasil dipromosikan menjadi Admin!"}
+    finally:
+        print("Grant Admin")
