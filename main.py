@@ -1,5 +1,5 @@
-from fastapi import FastAPI, Depends, HTTPException, status, Security, Request
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm, HTTPAuthorizationCredentials, HTTPBearer
+from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError
 from passlib.context import CryptContext
 from datetime import datetime, timedelta
@@ -20,6 +20,7 @@ import jwt
 import json
 from dotenv import load_dotenv, dotenv_values
 import mysql.connector
+import requests
 
 class Login(BaseModel):
     username: str
@@ -39,6 +40,7 @@ class Register(BaseModel):
     password: str
     nomorHp: str
     email: str
+    alamat: str
 
 # Model Pydantic untuk mendapatkan token
 class Token(BaseModel):
@@ -73,10 +75,34 @@ class CreatePegiriman(BaseModel):
     nomorHp: str
     estimasi: str
 
+class RequestRekomendasi(BaseModel):
+    gender: Literal ["Male", "Female"]
+    age: int
+    weight: float
+    height: float
+    activity: Literal ["sedentary", "lightly_active", "moderately_active", "very_active", "extra_active"]
+    mood: Literal ["happy", "loved", "focus", "chill", "sad", "scared", "angry", "neutral"] = None
+    weather: Literal ["yes", "no"] = None,
+    max_rec: int = 5
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "gender": "Male",
+                "age": 20,
+                "weight": 63.0,
+                "height": 171.0,
+                "activity": ["sedentary", "lightly_active", "moderately_active", "very_active", "extra_active"],
+                "mood": ["happy", "loved", "focus", "chill", "sad", "scared", "angry", "neutral"],
+                "weather": "['yes', 'no'] - Are you concerned about the weather?",
+                "max_rec": 5
+            }
+        }
+
 app = FastAPI()
 
 # Database Connection
-cnx = mysql.connector.connect(user="admin18221064", password="foodorderdelivery098!", host="foodorder-server.mysql.database.azure.com", port=3306, database="ordev", ssl_disabled=False)
+cnx = mysql.connector.connect(user="admin18221064", password="**********", host="foodorder-server.mysql.database.azure.com", port=3306, database="ordev", ssl_disabled=False)
 
 
 # Konfigurasi OAuth2
@@ -87,6 +113,8 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 SECRET_KEY = "d23444d634fa35cd0e708c59f8d623f46e623ad82cd9f85ed438298b9dda17c9"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
+
+tokenInt = ""
 
 # Dependency untuk mendapatkan pengguna berdasarkan token
 def get_user(token: str = Depends(oauth2_scheme)):
@@ -120,21 +148,38 @@ def create_access_token(data: dict, expires_delta: timedelta = None):
     return encoded_jwt
 
 # Endpoint untuk mendapatkan token
-@app.post("/token", response_model=Token, tags=["Auth"])
+@app.post("/token", tags=["Auth"])
 def login_for_access_token(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]):
     try:
         with cnx.cursor() as cursor:
+            global tokenInt
             cursor.execute(f"SELECT * FROM user WHERE username = '{form_data.username}'")
             user = cursor.fetchone()
             if user and verify_password(form_data.password, user[2]):
-                # Generate token dan simpan ke database
-                token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-                token = create_access_token(
-                    data={"sub": user[1]}, expires_delta=token_expires
-                )
-                cursor.execute(f"UPDATE user SET token = '{token}' WHERE username = '{user[1]}'")
-                cnx.commit()
-                return {"access_token": token, "token_type": "bearer"}
+                url = "https://bevbuddy--uj4gj7u.thankfulbush-47818fd3.southeastasia.azurecontainerapps.io/login"
+                data = {
+                    'username': form_data.username,
+                    'password': form_data.password
+                }
+                response = requests.post(url=url, json=data)
+                if response.status_code == 200:
+                    try:
+                        result = response.json()
+                        global tokenInt
+                        tokenInt = result.get('token')
+                        # Generate token dan simpan ke database
+                        token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+                        token = create_access_token(
+                            data={"sub": user[1]}, expires_delta=token_expires
+                        )
+                        cursor.execute(f"UPDATE user SET token = '{token}' WHERE username = '{user[1]}'")
+                        cnx.commit()
+                    except ValueError as e:
+                        print("Invalid JSON format in response:", response.text)
+                        return {'Error': 'Invalid JSON format in response'}
+                    return {'access_token': token, 'token_type': 'bearer', 'integrasiToken' : tokenInt}
+                else:
+                    return {'Error': response.status_code, 'Detail': response.text}
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid credentials",
@@ -194,10 +239,25 @@ async def register_user(registration_data: Register):
                 "nomorHp": registration_data.nomorHp,
                 "isAdmin": 0,
                 "email": registration_data.email,
-                "token" : ""
+                "token" : "",
+                "alamat": registration_data.alamat
             }
-            cursor.execute(f"""INSERT INTO user (idUser, username, password, nomorHp, isAdmin, email, token) 
-                        VALUES ({idUser}, '{registration_data.username}', '{hashed_password}', '{registration_data.nomorHp}', 0, '{registration_data.email}', '')""")
+            url = "https://bevbuddy--uj4gj7u.thankfulbush-47818fd3.southeastasia.azurecontainerapps.io/register"
+            req_data = {
+                "username": registration_data.username,
+                "fullname": registration_data.username,
+                "email": registration_data.email,
+                "password": registration_data.password,
+                "role": "customer",
+                "token": "requestToken"
+            }
+            headers = {
+                'accept': 'application/json',
+                'Content-Type': 'application/json'
+            }
+            response = requests.post(url=url,headers=headers,json=req_data)
+            cursor.execute(f"""INSERT INTO user (idUser, username, password, nomorHp, isAdmin, email, token, alamat) 
+                        VALUES ({idUser}, '{registration_data.username}', '{hashed_password}', '{registration_data.nomorHp}', 0, '{registration_data.email}', '', '{registration_data.alamat}')""")
             cnx.commit()
             return new_user
     finally:
@@ -452,34 +512,44 @@ async def do_pembayaran(idPesanan: int, data_transaksi: CreateTransaksi, current
         print("Do Pembayaran")
 
 # Route Transaksi
-@app.get("/transaksi", tags=["Admin"])
+@app.get("/transaksi", tags=["Admin & Customer"])
 async def get_transaksi(current_user: User = Depends(get_user)):
-    if(not current_user[4]):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Method ini hanya bisa digunakan oleh Admin!"
-        )
     try:
         with cnx.cursor() as cursor:
-            cursor.execute("Select * from Transaksi")
-            row = cursor.fetchall()
-
             transaksi = []
-            
-            for item in row:
-                transaksi_dict = {
-                    "idTransaksi": item[0],
-                    "idPesanan": item[1],
-                    "idUser": item[2],
-                    "metode": item[3],
-                    "tanggal": item[4],
-                    "totalHarga": item[5],
-                    "verifikasi": item[6],
-                    "buktiPembayara": item[7],
-                }
-                transaksi.append(transaksi_dict)
+            if(not current_user[4]):
+                cursor.execute(f"SELECT * FROM transaksi WHERE idUser = {current_user[0]}")
+                result = cursor.fetchall()
+                for item in result:
+                    transaksi_dict = {
+                        "idTransaksi":item[0],
+                        "idPesanan":item[1],
+                        "metode":item[3],
+                        "tanggal":item[4],
+                        "totalHarga":item[5],
+                        "verifikasi":item[6],
+                        "buktiPembayaran":item[7],
+                    }
+                    transaksi.append(transaksi_dict)  
+            else:
+                cursor.execute("Select * from Transaksi")
+                row = cursor.fetchall()
+
+                for item in row:
+                    transaksi_dict = {
+                        "idTransaksi": item[0],
+                        "idPesanan": item[1],
+                        "idUser": item[2],
+                        "metode": item[3],
+                        "tanggal": item[4],
+                        "totalHarga": item[5],
+                        "verifikasi": item[6],
+                        "buktiPembayara": item[7],
+                    }
+                    transaksi.append(transaksi_dict)
 
             return transaksi
+            
     finally:
         print("Get Transaksi")
 
@@ -587,3 +657,30 @@ async def verifikasi_pengiriman(idPengiriman: int ,current_user: User = Depends(
             return {"message" : "Verifikasi pengiriman telah sampai berhasil!"}
     finally:
         print("Verifikasi Pengiriman")
+
+# Route Integrasi
+@app.post("/rekomendasi", tags = ["Rekomendasi"])      
+async def rekomendasi_produk(rekomendasi: RequestRekomendasi, user: User = Depends(get_user)):
+    global tokenInt
+    url = "https://bevbuddy--uj4gj7u.thankfulbush-47818fd3.southeastasia.azurecontainerapps.io/recommendations"
+    headers = {
+        'accept': 'application/json',
+        'Authorization': f'Bearer {tokenInt}'
+    }
+    form_data = {
+        "gender": rekomendasi.gender,
+        "age": rekomendasi.age,
+        "weight": rekomendasi.weight,
+        "height": rekomendasi.height,
+        "activity": rekomendasi.activity,
+        "mood" : rekomendasi.mood,
+        "weather": rekomendasi.weather,
+        "max_rec": rekomendasi.max_rec
+        
+    }
+    response = requests.post(url, headers=headers, json=form_data)
+    if response.status_code == 200:
+        data = response.json()
+        return data
+    else:
+        return {'Error': response.status_code, 'Detail': response.text}
