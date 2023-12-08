@@ -102,7 +102,7 @@ class RequestRekomendasi(BaseModel):
 app = FastAPI()
 
 # Database Connection
-cnx = mysql.connector.connect(user="admin18221064", password="**********", host="foodorder-server.mysql.database.azure.com", port=3306, database="ordev", ssl_disabled=False)
+cnx = mysql.connector.connect(user="admin18221064", password="************", host="foodorder-server.mysql.database.azure.com", port=3306, database="ordev", ssl_disabled=False)
 
 
 # Konfigurasi OAuth2
@@ -609,7 +609,7 @@ async def get_pengiriman(current_user: User = Depends(get_user)):
         with cnx.cursor() as cursor:
             pengiriman = []
             if(not current_user[4]):
-                cursor.execute(f"SELECT * FROM pengiriman INNER JOIN transaksi WHERE idUser = {current_user[0]}")
+                cursor.execute(f"SELECT * FROM pengiriman INNER JOIN transaksi ON pengiriman.idTransaksi = transaksi.idTransaksi WHERE idUser = {current_user[0]}")
                 result = cursor.fetchall()
                 for item in result:
                     pengiriman_dict = {
