@@ -423,17 +423,17 @@ async def add_pesanan(list_pesanan: CreatePesanan, current_user: User = Depends(
                 harga_produk = produk_dict[id_produk]["harga"]
                 jumlah += kuantitas
                 total_harga += harga_produk * kuantitas
-            cnx.commit()
-            cursor.execute("SELECT * FROM pesanan ORDER BY idPesanan DESC")
+            
+            cursor.execute(f"SELECT * FROM pesanan ORDER BY idPesanan DESC")
             rp = cursor.fetchone()
             idPesanan = 1
             if(rp is not None):
-                idPesanan = int(rp[0]) + 1
+                idPesanan += rp[0]
+            cursor.fetchall()
             cursor.execute(
                 f"""INSERT INTO pesanan (idPesanan, idUser, detail, jumlah, harga, status)
                     VALUES ({idPesanan}, {current_user[0]}, '{json.dumps(pesanan_details)}', {jumlah}, {total_harga}, 0)""",
             )
-            # Lanjutkan!!
             cnx.commit()
             return {"message" : "Berhasil menambahkan pesanan!"}
     finally:
@@ -476,6 +476,7 @@ async def do_pembayaran(idPesanan: int, data_transaksi: CreateTransaksi, current
                     bayar = pesanan[4]
                 else:
                     bayar = data_transaksi.totalHarga
+                cursor.fetchall()
                 if sisa <= 0:
                     cursor.execute(
                         f"""UPDATE pesanan SET status = 1
@@ -544,7 +545,7 @@ async def get_transaksi(current_user: User = Depends(get_user)):
                         "tanggal": item[4],
                         "totalHarga": item[5],
                         "verifikasi": item[6],
-                        "buktiPembayara": item[7],
+                        "buktiPembayaran": item[7],
                     }
                     transaksi.append(transaksi_dict)
 
@@ -588,8 +589,11 @@ async def verifikasi_transaksi(idTransaksi: int, pengiriman: CreatePegiriman, cu
             if(pr is not None):
                 idPengiriman += int(pr[0])
             
+            cursor.execute(f"Select * from user WHERE idUser = {transaksi[2]}")
+            customer = cursor.fetchone()
+
             cursor.execute(f"""INSERT INTO pengiriman (idPengiriman, idTransaksi, namaKurir, nomorHp, estimasi, status, alamatTujuan)
-                        VALUES ({idPengiriman}, {idTransaksi}, '{pengiriman.namaKurir}', '{pengiriman.nomorHp}', '{pengiriman.estimasi}', 0, '{current_user[7]}')""")
+                        VALUES ({idPengiriman}, {idTransaksi}, '{pengiriman.namaKurir}', '{pengiriman.nomorHp}', '{pengiriman.estimasi}', 0, '{customer[7]}')""")
             cursor.execute(
                         f"""UPDATE transaksi SET verifikasi = 1
                         WHERE idTransaksi = {idTransaksi}""")
@@ -684,7 +688,7 @@ async def rekomendasi_produk(rekomendasi: RequestRekomendasi, user: User = Depen
         return data
     else:
         return {'Error': response.status_code, 'Detail': response.text}
-
+    
 # Route Grant Admin
 @app.put("/grant_admin", tags=["Admin"])
 async def grant_customer_to_admin(idUser:int , current_user: User = Depends(get_user)):
